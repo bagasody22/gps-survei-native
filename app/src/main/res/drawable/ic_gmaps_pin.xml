@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Bayangan halus di bawah ujung pin -->
+    <path
+        android:fillColor="#77000000"
+        android:pathData="M54,82A11,3.5 0 1,1 54,89A11,3.5 0 1,1 54,82z" />
+
+    <!-- Badan pin merah elegan -->
+    <path
+        android:fillColor="#E11D48"
+        android:pathData="M54,21C40.75,21 30,31.75 30,45C30,62.8 54,85.5 54,85.5C54,85.5 78,62.8 78,45C78,31.75 67.25,21 54,21z" />
+
+    <!-- Sorotan kilau lembut di kiri atas pin -->
+    <path
+        android:fillColor="#FB7185"
+        android:pathData="M54,24.5C43.2,24.5 34.5,33.2 34.5,44C34.5,46.2 34.9,48.3 35.6,50.3C37.2,38.4 47.4,29 59.8,29C61.9,29 63.9,29.3 65.8,29.8C62.6,26.5 58.5,24.5 54,24.5z" />
+
+    <!-- Lingkaran aksen merah tua di tengah -->
+    <path
+        android:fillColor="#BE123C"
+        android:pathData="M54,34A11,11 0 1,1 54,56A11,11 0 1,1 54,34z" />
+
+    <!-- Lingkaran tengah putih -->
+    <path
+        android:fillColor="#F8FAFC"
+        android:pathData="M54,36.5A8.5,8.5 0 1,1 54,53.5A8.5,8.5 0 1,1 54,36.5z" />
+</vector>
