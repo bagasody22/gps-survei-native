@@ -4,7 +4,6 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Build
@@ -12,7 +11,6 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.Looper
 import android.provider.MediaStore
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -73,7 +71,6 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
 data class TrackPoint(
     val latitude: Double,
     val longitude: Double,
@@ -98,9 +95,13 @@ private val TextWhite = Color(0xFFF1F5F9)
 private val TextMuted = Color(0xFF94A3B8)
 private val AccentBlue = Color(0xFF38BDF8)
 private val BtnGreen = Color(0xFF10B981)
+private val BtnGreenActive = Color(0xFF047857)
 private val BtnAmber = Color(0xFFB45309)
+private val BtnAmberLocked = Color(0xFFF59E0B)
 private val BtnRed = Color(0xFF991B1B)
+private val BtnRedPressed = Color(0xFFEF4444)
 private val BtnTagCyan = Color(0xFF22D3EE)
+private val BtnTagCyanPressed = Color(0xFF0891B2)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -125,6 +126,9 @@ fun GpsTaggingKmlScreen() {
 
     var isTracking by remember { mutableStateOf(false) }
     var isLineLocked by remember { mutableStateOf(false) }
+    var isRefreshingGps by remember { mutableStateOf(false) }
+    var isSavingKml by remember { mutableStateOf(false) }
+    var isTaggingPressed by remember { mutableStateOf(false) }
 
     var kmlFileName by remember { mutableStateOf("") }
     var tagName by remember { mutableStateOf("") }
@@ -156,26 +160,27 @@ fun GpsTaggingKmlScreen() {
         )
     }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { perms ->
-        hasLocationPermission = perms[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-            perms[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        if (hasLocationPermission) {
-            isTracking = true
-            val cur = currentLocation
-            if (cur != null && trackPoints.isEmpty()) {
-                trackPoints.add(
-                    TrackPoint(
-                        latitude = cur.latitude,
-                        longitude = cur.longitude,
-                        altitude = if (cur.hasAltitude()) cur.altitude else 0.0
-                    )
-                )
-                lastTrackLocation = cur
-            }
+    fun isAccurateEnough(loc: Location): Boolean {
+        return !loc.hasAccuracy() || loc.accuracy <= 25.0f
+    }
+
+    fun appendTrackPointIfValid(loc: Location, minMeters: Double) {
+        if (!isTracking || isLineLocked) return
+        if (!isAccurateEnough(loc)) return
+        if (loc.latitude == 0.0 && loc.longitude == 0.0) return
+
+        val alt = if (loc.hasAltitude()) loc.altitude else 0.0
+        val prev = lastTrackLocation
+        if (prev == null) {
+            trackPoints.add(TrackPoint(loc.latitude, loc.longitude, alt))
+            lastTrackLocation = loc
         } else {
-            Toast.makeText(context, "Izin lokasi diperlukan untuk survei GPS", Toast.LENGTH_SHORT).show()
+            val dist = loc.distanceTo(prev).toDouble()
+            if (dist in minMeters..150.0) {
+                totalPathMeters += dist
+                trackPoints.add(TrackPoint(loc.latitude, loc.longitude, alt))
+                lastTrackLocation = loc
+            }
         }
     }
 
@@ -184,43 +189,55 @@ fun GpsTaggingKmlScreen() {
             override fun onLocationResult(result: LocationResult) {
                 val loc = result.lastLocation ?: return
                 currentLocation = loc
-
-                if (!isTracking || isLineLocked) return
-
-                val prev = lastTrackLocation
-                val alt = if (loc.hasAltitude()) loc.altitude else 0.0
-                if (prev == null) {
-                    trackPoints.add(TrackPoint(loc.latitude, loc.longitude, alt))
-                    lastTrackLocation = loc
-                } else {
-                    val dist = loc.distanceTo(prev).toDouble()
-                    if (dist >= 2.0) {
-                        totalPathMeters += dist
-                        trackPoints.add(TrackPoint(loc.latitude, loc.longitude, alt))
-                        lastTrackLocation = loc
-                    }
+                isRefreshingGps = false
+                if (isTracking && !isLineLocked) {
+                    appendTrackPointIfValid(loc, minMeters = 3.0)
                 }
             }
         }
     }
 
-    DisposableEffect(hasLocationPermission) {
-        if (hasLocationPermission) {
-            val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2500L)
-                .setMinUpdateIntervalMillis(1000L)
+    DisposableEffect(hasLocationPermission, isTracking, isRefreshingGps) {
+        val shouldListen = hasLocationPermission && (isTracking || isRefreshingGps)
+        if (shouldListen) {
+            val interval = if (isTracking) 3500L else 2000L
+            val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, interval)
+                .setMinUpdateIntervalMillis(1500L)
                 .build()
             fusedLocationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
             fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
-                if (loc != null && currentLocation == null) {
-                    currentLocation = loc
+                if (loc != null) {
+                    if (currentLocation == null || (loc.hasAccuracy() && loc.accuracy <= (currentLocation?.accuracy ?: Float.MAX_VALUE))) {
+                        currentLocation = loc
+                    }
+                    if (isTracking && !isLineLocked) {
+                        appendTrackPointIfValid(loc, minMeters = 3.0)
+                    }
                 }
             }
+        } else {
+            fusedLocationClient.removeLocationUpdates(locationCallback)
         }
+
         onDispose {
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }
     }
-        fun startSurvey() {
+        val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { perms ->
+        hasLocationPermission = perms[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            perms[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (hasLocationPermission) {
+            isTracking = true
+            isLineLocked = false
+            Toast.makeText(context, "Izin diberikan, survei aktif", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Izin lokasi diperlukan untuk survei GPS", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun startSurvey() {
         if (!hasLocationPermission) {
             permissionLauncher.launch(
                 arrayOf(
@@ -232,26 +249,56 @@ fun GpsTaggingKmlScreen() {
         }
         isTracking = true
         isLineLocked = false
-        val cur = currentLocation
-        if (cur != null && trackPoints.isEmpty()) {
-            trackPoints.add(
-                TrackPoint(
-                    latitude = cur.latitude,
-                    longitude = cur.longitude,
-                    altitude = if (cur.hasAltitude()) cur.altitude else 0.0
-                )
-            )
-            lastTrackLocation = cur
-        }
+        currentLocation?.let { appendTrackPointIfValid(it, minMeters = 0.0) }
         Toast.makeText(context, "Survei dimulai", Toast.LENGTH_SHORT).show()
     }
 
-    fun addTagPoint() {
-        val loc = currentLocation
-        if (loc == null) {
-            Toast.makeText(context, "Menunggu koordinat GPS terkunci...", Toast.LENGTH_SHORT).show()
+    fun refreshGpsPosition() {
+        if (!hasLocationPermission) {
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
             return
         }
+        isRefreshingGps = true
+        Toast.makeText(context, "Mengambil posisi GPS terbaru...", Toast.LENGTH_SHORT).show()
+        fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+            .addOnSuccessListener { loc ->
+                if (loc != null) {
+                    currentLocation = loc
+                    if (isTracking && !isLineLocked) {
+                        appendTrackPointIfValid(loc, minMeters = 2.5)
+                    }
+                    val accText = if (loc.hasAccuracy()) String.format(Locale.US, "±%.1f m", loc.accuracy) else "-"
+                    Toast.makeText(context, "Posisi diperbarui (Akurasi $accText)", Toast.LENGTH_SHORT).show()
+                }
+                isRefreshingGps = false
+            }
+            .addOnFailureListener {
+                isRefreshingGps = false
+                Toast.makeText(context, "Gagal memperbarui posisi GPS", Toast.LENGTH_SHORT).show()
+            }
+    }
+
+    fun addTagPoint() {
+        isTaggingPressed = true
+        val loc = currentLocation
+        if (loc == null) {
+            isTaggingPressed = false
+            Toast.makeText(context, "Tekan GPS dulu atau tunggu koordinat terkunci", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (loc.hasAccuracy() && loc.accuracy > 35.0f) {
+            Toast.makeText(
+                context,
+                String.format(Locale.US, "Peringatan: Akurasi ±%.1f m (kurang presisi)", loc.accuracy),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+
         val alt = if (loc.hasAltitude()) loc.altitude else 0.0
         val cleanName = tagName.trim().ifEmpty { "Titik ${taggedPoints.size + 1}" }
         val timeStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
@@ -269,28 +316,31 @@ fun GpsTaggingKmlScreen() {
         )
 
         if (isTracking && !isLineLocked) {
-            val prev = lastTrackLocation
-            if (prev == null) {
-                trackPoints.add(TrackPoint(loc.latitude, loc.longitude, alt))
-                lastTrackLocation = loc
-            } else {
-                val dist = loc.distanceTo(prev).toDouble()
-                if (dist >= 0.5) {
-                    totalPathMeters += dist
-                    trackPoints.add(TrackPoint(loc.latitude, loc.longitude, alt))
-                    lastTrackLocation = loc
-                }
-            }
+            appendTrackPointIfValid(loc, minMeters = 1.0)
         }
 
         tagName = ""
         noteText = ""
+        isTaggingPressed = false
         Toast.makeText(context, "Titik '$cleanName' ditambahkan", Toast.LENGTH_SHORT).show()
     }
 
+    fun clearSessionData() {
+        taggedPoints.clear()
+        trackPoints.clear()
+        lastTrackLocation = null
+        totalPathMeters = 0.0
+        isLineLocked = false
+    }
+
     fun stopAndSaveKml() {
+        isSavingKml = true
         isTracking = false
+        isRefreshingGps = false
+        fusedLocationClient.removeLocationUpdates(locationCallback)
+
         if (taggedPoints.isEmpty() && trackPoints.isEmpty()) {
+            isSavingKml = false
             Toast.makeText(context, "Belum ada titik atau jalur untuk disimpan", Toast.LENGTH_SHORT).show()
             return
         }
@@ -313,23 +363,22 @@ fun GpsTaggingKmlScreen() {
 
         val saved = saveKmlToDownloads(context, fileName, kmlContent)
         if (saved) {
-            Toast.makeText(context, "Tersimpan di Download/$fileName", Toast.LENGTH_LONG).show()
+            clearSessionData()
+            kmlFileName = ""
+            Toast.makeText(context, "Tersimpan di Download/$fileName & sesi direset", Toast.LENGTH_LONG).show()
         } else {
             Toast.makeText(context, "Gagal menyimpan file KML", Toast.LENGTH_LONG).show()
         }
+        isSavingKml = false
     }
 
     fun resetManual() {
         isTracking = false
-        isLineLocked = false
-        taggedPoints.clear()
-        trackPoints.clear()
-        lastTrackLocation = null
-        totalPathMeters = 0.0
-        Toast.makeText(context, "Data sesi direset", Toast.LENGTH_SHORT).show()
+        isRefreshingGps = false
+        clearSessionData()
+        Toast.makeText(context, "Riwayat sesi direset", Toast.LENGTH_SHORT).show()
     }
-
-    Scaffold(
+        Scaffold(
         containerColor = BgDark,
         bottomBar = {
             Column(
@@ -347,7 +396,7 @@ fun GpsTaggingKmlScreen() {
                     Button(
                         onClick = { startSurvey() },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = BtnGreen,
+                            containerColor = if (isTracking) BtnGreenActive else BtnGreen,
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(10.dp),
@@ -355,7 +404,7 @@ fun GpsTaggingKmlScreen() {
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(
-                            text = if (isTracking) "▶ Aktif" else "▶ Start",
+                            text = if (isTracking) "▶ Berjalan" else "▶ Start",
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
                             maxLines = 1
@@ -365,8 +414,8 @@ fun GpsTaggingKmlScreen() {
                     Button(
                         onClick = { isLineLocked = !isLineLocked },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isLineLocked) Color(0xFFD97706) else BtnAmber,
-                            contentColor = Color.White
+                            containerColor = if (isLineLocked) BtnAmberLocked else BtnAmber,
+                            contentColor = if (isLineLocked) Color(0xFF111827) else Color.White
                         ),
                         shape = RoundedCornerShape(10.dp),
                         contentPadding = PaddingValues(vertical = 10.dp, horizontal = 8.dp),
@@ -383,7 +432,7 @@ fun GpsTaggingKmlScreen() {
                     Button(
                         onClick = { stopAndSaveKml() },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = BtnRed,
+                            containerColor = if (isSavingKml) BtnRedPressed else BtnRed,
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(10.dp),
@@ -391,7 +440,7 @@ fun GpsTaggingKmlScreen() {
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(
-                            text = "■ Stop & Save",
+                            text = if (isSavingKml) "Menyimpan..." else "■ Stop & Save",
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
                             maxLines = 1
@@ -408,28 +457,18 @@ fun GpsTaggingKmlScreen() {
                             .weight(0.42f)
                             .height(44.dp)
                             .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFF1E293B))
-                            .border(1.dp, BorderDark, RoundedCornerShape(10.dp))
-                            .clickable {
-                                if (!hasLocationPermission) {
-                                    permissionLauncher.launch(
-                                        arrayOf(
-                                            Manifest.permission.ACCESS_FINE_LOCATION,
-                                            Manifest.permission.ACCESS_COARSE_LOCATION
-                                        )
-                                    )
-                                } else {
-                                    context.startActivity(
-                                        Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
-                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    )
-                                }
-                            },
+                            .background(if (isRefreshingGps) AccentBlue else Color(0xFF1E293B))
+                            .border(
+                                width = 1.dp,
+                                color = if (isRefreshingGps) AccentBlue else BorderDark,
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .clickable { refreshGpsPosition() },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "⚙ GPS",
-                            color = TextWhite,
+                            text = if (isRefreshingGps) "⟳ Mencari..." else "⚙ GPS",
+                            color = if (isRefreshingGps) Color(0xFF06202A) else TextWhite,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 13.sp
                         )
@@ -438,7 +477,7 @@ fun GpsTaggingKmlScreen() {
                     Button(
                         onClick = { addTagPoint() },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = BtnTagCyan,
+                            containerColor = if (isTaggingPressed) BtnTagCyanPressed else BtnTagCyan,
                             contentColor = Color(0xFF06202A)
                         ),
                         shape = RoundedCornerShape(10.dp),
@@ -456,7 +495,7 @@ fun GpsTaggingKmlScreen() {
             }
         }
     ) { innerPadding ->
-                Column(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
@@ -474,7 +513,7 @@ fun GpsTaggingKmlScreen() {
                         modifier = Modifier
                             .size(10.dp)
                             .clip(CircleShape)
-                            .background(AccentBlue)
+                            .background(if (isTracking) BtnGreen else AccentBlue)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -558,7 +597,12 @@ fun GpsTaggingKmlScreen() {
                             fontSize = 12.sp
                         )
                         Text(
-                            text = if (currentLocation != null) "• AKTIF" else "• MENCARI",
+                            text = when {
+                                isRefreshingGps -> "• REFRESH"
+                                currentLocation != null && isTracking -> "• AKTIF"
+                                currentLocation != null -> "• TERSIMPAN"
+                                else -> "• STANDBY"
+                            },
                             color = if (currentLocation != null) BtnGreen else TextMuted,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp
@@ -600,9 +644,10 @@ fun GpsTaggingKmlScreen() {
                         }
                     }
                 }
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "Nama File KML (Bisa Diedit Sebelum Save)",
+                        text = "Nama File KML (Kosongkan = Otomatis)",
                         color = TextWhite,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp
@@ -612,7 +657,7 @@ fun GpsTaggingKmlScreen() {
                         onValueChange = { kmlFileName = it },
                         placeholder = {
                             Text(
-                                "Contoh: jalur_maesan_01 (otomatis jadi .kml)",
+                                "Misal: survei_lapangan_01 (.kml otomatis)",
                                 color = TextMuted,
                                 fontSize = 13.sp,
                                 maxLines = 1,
@@ -755,8 +800,7 @@ fun GpsTaggingKmlScreen() {
                     }
                 }
             }
-
-            Column(
+                        Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
@@ -831,6 +875,7 @@ fun GpsTaggingKmlScreen() {
         }
     }
 }
+
 @Composable
 private fun StatBox(
     label: String,
