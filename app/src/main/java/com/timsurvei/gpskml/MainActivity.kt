@@ -220,8 +220,7 @@ fun GpsTaggingKmlScreen() {
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }
     }
-
-    fun startSurvey() {
+        fun startSurvey() {
         if (!hasLocationPermission) {
             permissionLauncher.launch(
                 arrayOf(
@@ -601,8 +600,7 @@ fun GpsTaggingKmlScreen() {
                         }
                     }
                 }
-
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
                         text = "Nama File KML (Bisa Diedit Sebelum Save)",
                         color = TextWhite,
@@ -833,7 +831,6 @@ fun GpsTaggingKmlScreen() {
         }
     }
 }
-
 @Composable
 private fun StatBox(
     label: String,
