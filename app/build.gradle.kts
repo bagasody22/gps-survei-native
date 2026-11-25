@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.bagasody.gpssurveikml"
+    namespace = "com.timsurvei.gpskml"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.bagasody.gpssurveikml"
+        applicationId = "com.timsurvei.gpskml"
         minSdk = 24
         targetSdk = 35
         versionCode = 1
