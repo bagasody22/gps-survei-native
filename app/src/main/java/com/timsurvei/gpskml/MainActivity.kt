@@ -1142,12 +1142,18 @@ private fun buildKml22(
       <IconStyle>
         <color>ff0000ff</color>
         <scale>1.2</scale>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href>
+        </Icon>
       </IconStyle>
     </Style>
     <Style id="styleUcClosure">
       <IconStyle>
-        <color>ffff0000</color>
+        <color>ff00ff00</color>
         <scale>1.2</scale>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href>
+        </Icon>
       </IconStyle>
     </Style>
     <Style id="trackLine">
