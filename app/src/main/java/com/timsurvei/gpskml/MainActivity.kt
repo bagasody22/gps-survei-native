@@ -57,6 +57,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -122,6 +124,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun GpsTaggingKmlScreen() {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val fusedLocationClient = remember {
         LocationServices.getFusedLocationProviderClient(context)
     }
@@ -160,6 +164,11 @@ fun GpsTaggingKmlScreen() {
                 Manifest.permission.ACCESS_FINE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
         )
+    }
+
+    fun clearInputFocusAndKeyboard() {
+        focusManager.clearFocus()
+        keyboardController?.hide()
     }
 
     LaunchedEffect(showSavedBadge) {
@@ -253,6 +262,7 @@ fun GpsTaggingKmlScreen() {
     }
 
     fun selectCategory(newCategory: String) {
+        clearInputFocusAndKeyboard()
         selectedCategory = newCategory
         if (tagName.isBlank() || isTagNameAuto) {
             tagName = buildAutoTagName(newCategory)
@@ -261,6 +271,7 @@ fun GpsTaggingKmlScreen() {
     }
 
     fun startSurvey() {
+        clearInputFocusAndKeyboard()
         if (!hasLocationPermission) {
             permissionLauncher.launch(
                 arrayOf(
@@ -277,6 +288,11 @@ fun GpsTaggingKmlScreen() {
     }
 
     fun refreshGpsPosition() {
+        clearInputFocusAndKeyboard()
+        if (!isTracking) {
+            Toast.makeText(context, "Tekan ▶ Start terlebih dahulu untuk memulai survei", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (!hasLocationPermission) {
             permissionLauncher.launch(
                 arrayOf(
@@ -327,14 +343,19 @@ fun GpsTaggingKmlScreen() {
             appendTrackPointIfValid(targetLoc, minMeters = 1.0)
         }
 
-        tagName = buildAutoTagName(selectedCategory)
-        isTagNameAuto = true
-        noteText = ""
+        if (isTagNameAuto) {
+            tagName = buildAutoTagName(selectedCategory)
+        }
         isTaggingPressed = false
         Toast.makeText(context, "Titik '$cleanName' ditambahkan", Toast.LENGTH_SHORT).show()
     }
 
     fun addTagPoint() {
+        clearInputFocusAndKeyboard()
+        if (!isTracking) {
+            Toast.makeText(context, "Tekan ▶ Start terlebih dahulu untuk memulai survei", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (!hasLocationPermission) {
             permissionLauncher.launch(
                 arrayOf(
@@ -404,6 +425,12 @@ fun GpsTaggingKmlScreen() {
     }
 
     fun stopAndSaveKml() {
+        clearInputFocusAndKeyboard()
+        if (!isTracking && taggedPoints.isEmpty() && trackPoints.isEmpty()) {
+            Toast.makeText(context, "Tekan ▶ Start terlebih dahulu", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         isSavingKml = true
         isTracking = false
         isRefreshingGps = false
@@ -443,14 +470,16 @@ fun GpsTaggingKmlScreen() {
     }
 
     fun resetManual() {
+        clearInputFocusAndKeyboard()
         isTracking = false
         isRefreshingGps = false
         clearSessionData()
-        Toast.makeText(context, "Riwayat sesi direset", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Data sesi direset", Toast.LENGTH_SHORT).show()
     }
         Scaffold(
         containerColor = BgDark,
         bottomBar = {
+            val canOperate = isTracking
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -482,10 +511,16 @@ fun GpsTaggingKmlScreen() {
                     }
 
                     Button(
-                        onClick = { isLineLocked = !isLineLocked },
+                        onClick = {
+                            clearInputFocusAndKeyboard()
+                            if (canOperate) isLineLocked = !isLineLocked
+                        },
+                        enabled = canOperate,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (isLineLocked) BtnAmberLocked else BtnAmber,
-                            contentColor = if (isLineLocked) Color(0xFF111827) else Color.White
+                            contentColor = if (isLineLocked) Color(0xFF111827) else Color.White,
+                            disabledContainerColor = Color(0xFF1E293B),
+                            disabledContentColor = TextMuted
                         ),
                         shape = RoundedCornerShape(10.dp),
                         contentPadding = PaddingValues(vertical = 10.dp, horizontal = 8.dp),
@@ -500,10 +535,15 @@ fun GpsTaggingKmlScreen() {
                     }
 
                     Button(
-                        onClick = { stopAndSaveKml() },
+                        onClick = {
+                            if (canOperate) stopAndSaveKml()
+                        },
+                        enabled = canOperate,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (isSavingKml) BtnRedPressed else BtnRed,
-                            contentColor = Color.White
+                            contentColor = Color.White,
+                            disabledContainerColor = Color(0xFF1E293B),
+                            disabledContentColor = TextMuted
                         ),
                         shape = RoundedCornerShape(10.dp),
                         contentPadding = PaddingValues(vertical = 10.dp, horizontal = 8.dp),
@@ -527,28 +567,43 @@ fun GpsTaggingKmlScreen() {
                             .weight(0.42f)
                             .height(44.dp)
                             .clip(RoundedCornerShape(10.dp))
-                            .background(if (isRefreshingGps) AccentBlue else Color(0xFF1E293B))
+                            .background(
+                                when {
+                                    !canOperate -> Color(0xFF141C2B)
+                                    isRefreshingGps -> AccentBlue
+                                    else -> Color(0xFF1E293B)
+                                }
+                            )
                             .border(
                                 width = 1.dp,
-                                color = if (isRefreshingGps) AccentBlue else BorderDark,
+                                color = if (canOperate && isRefreshingGps) AccentBlue else BorderDark,
                                 shape = RoundedCornerShape(10.dp)
                             )
-                            .clickable { refreshGpsPosition() },
+                            .clickable(enabled = canOperate) { refreshGpsPosition() },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = if (isRefreshingGps) "⟳ Mencari..." else "⚙ GPS",
-                            color = if (isRefreshingGps) Color(0xFF06202A) else TextWhite,
+                            color = when {
+                                !canOperate -> TextMuted
+                                isRefreshingGps -> Color(0xFF06202A)
+                                else -> TextWhite
+                            },
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 13.sp
                         )
                     }
 
                     Button(
-                        onClick = { addTagPoint() },
+                        onClick = {
+                            if (canOperate) addTagPoint()
+                        },
+                        enabled = canOperate,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (isTaggingPressed) BtnTagCyanPressed else BtnTagCyan,
-                            contentColor = Color(0xFF06202A)
+                            contentColor = Color(0xFF06202A),
+                            disabledContainerColor = Color(0xFF1E293B),
+                            disabledContentColor = TextMuted
                         ),
                         shape = RoundedCornerShape(10.dp),
                         contentPadding = PaddingValues(vertical = 10.dp, horizontal = 12.dp),
@@ -712,7 +767,7 @@ fun GpsTaggingKmlScreen() {
 
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "Nama File KML (Kosongkan = Otomatis)",
+                        text = "Nama File KML (Otomatis jika kosong)",
                         color = TextWhite,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp
@@ -722,7 +777,7 @@ fun GpsTaggingKmlScreen() {
                         onValueChange = { kmlFileName = it },
                         placeholder = {
                             Text(
-                                "Misal: survei_lapangan_01 (.kml otomatis)",
+                                "Otomatis jika kosong (contoh: survei_ruas_01)",
                                 color = TextMuted,
                                 fontSize = 13.sp,
                                 maxLines = 1,
@@ -759,7 +814,7 @@ fun GpsTaggingKmlScreen() {
                         },
                         placeholder = {
                             Text(
-                                "Contoh: Tiang TE 1 / ODP 1",
+                                "Otomatis sesuai kategori (bisa diubah)",
                                 color = TextMuted,
                                 fontSize = 13.sp,
                                 maxLines = 1,
@@ -800,7 +855,10 @@ fun GpsTaggingKmlScreen() {
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(TileDark)
                                     .border(1.dp, BorderDark, RoundedCornerShape(10.dp))
-                                    .clickable { categoryExpanded = true }
+                                    .clickable {
+                                        clearInputFocusAndKeyboard()
+                                        categoryExpanded = true
+                                    }
                                     .padding(horizontal = 12.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
@@ -845,7 +903,7 @@ fun GpsTaggingKmlScreen() {
                             onValueChange = { noteText = it },
                             placeholder = {
                                 Text(
-                                    "Catatan singkat...",
+                                    "Catatan titik (opsional)",
                                     color = TextMuted,
                                     fontSize = 13.sp,
                                     maxLines = 1,
@@ -1024,17 +1082,21 @@ private fun buildKml22(
                     <coordinates>${pt.longitude},${pt.latitude},${pt.altitude}</coordinates>
                   </Point>
                 </Placemark>
+
                 """.trimIndent()
             )
-            append("\n")
         }
+    }.trim()
+
+    val validTrackPoints = trackPoints.filter {
+        !(it.latitude == 0.0 && it.longitude == 0.0)
     }
 
-    val lineCoords = trackPoints.joinToString(" ") { pt ->
+    val lineCoords = validTrackPoints.joinToString(" ") { pt ->
         "${pt.longitude},${pt.latitude},${pt.altitude}"
     }
 
-    val trackPlacemark = if (trackPoints.size >= 2) {
+    val trackPlacemark = if (validTrackPoints.size >= 2) {
         """
         <Placemark>
           <name>Jalur $safeTitle</name>
@@ -1049,53 +1111,52 @@ private fun buildKml22(
         ""
     }
 
+    val bodyContent = listOfNotNull(
+        tagPlacemarks.takeIf { it.isNotEmpty() },
+        trackPlacemark.takeIf { it.isNotEmpty() }
+    ).joinToString("\n")
+
     return """<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
     <name>$safeTitle</name>
     <Style id="styleTiangTe">
       <IconStyle>
-        <color>ff00ffff</color>
-        <scale>1.1</scale>
+        <color>ffffffff</color>
+        <scale>1.05</scale>
         <Icon>
-          <href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href>
+          <href>http://maps.google.com/mapfiles/kml/shapes/shaded_dot.png</href>
         </Icon>
       </IconStyle>
     </Style>
     <Style id="styleTiangTb">
       <IconStyle>
-        <color>ffff0000</color>
-        <scale>1.1</scale>
+        <color>ff0000ff</color>
+        <scale>1.05</scale>
         <Icon>
-          <href>http://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png</href>
+          <href>http://maps.google.com/mapfiles/kml/shapes/shaded_dot.png</href>
         </Icon>
       </IconStyle>
     </Style>
     <Style id="styleOdp">
       <IconStyle>
         <color>ff0000ff</color>
-        <scale>1.15</scale>
-        <Icon>
-          <href>http://maps.google.com/mapfiles/kml/paddle/red-circle.png</href>
-        </Icon>
+        <scale>1.2</scale>
       </IconStyle>
     </Style>
     <Style id="styleUcClosure">
       <IconStyle>
-        <color>ff00ff00</color>
-        <scale>1.15</scale>
-        <Icon>
-          <href>http://maps.google.com/mapfiles/kml/paddle/grn-diamond.png</href>
-        </Icon>
+        <color>ffff0000</color>
+        <scale>1.2</scale>
       </IconStyle>
     </Style>
     <Style id="trackLine">
       <LineStyle>
-        <color>ff0000ff</color>
+        <color>ff00ffff</color>
         <width>4</width>
       </LineStyle>
     </Style>
-    $tagPlacemarks$trackPlacemark
+    $bodyContent
   </Document>
 </kml>
 """.trimIndent()
