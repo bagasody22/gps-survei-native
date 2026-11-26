@@ -46,6 +46,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +67,7 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import kotlinx.coroutines.delay
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -129,10 +131,18 @@ fun GpsTaggingKmlScreen() {
     var isRefreshingGps by remember { mutableStateOf(false) }
     var isSavingKml by remember { mutableStateOf(false) }
     var isTaggingPressed by remember { mutableStateOf(false) }
+    var showSavedBadge by remember { mutableStateOf(false) }
 
     var kmlFileName by remember { mutableStateOf("") }
     var tagName by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf("Titik Utama") }
+    var isTagNameAuto by remember { mutableStateOf(true) }
+    val categories = listOf(
+        "Tiang TE",
+        "Tiang TB",
+        "ODP",
+        "UC/Closure"
+    )
+    var selectedCategory by remember { mutableStateOf(categories.first()) }
     var categoryExpanded by remember { mutableStateOf(false) }
     var noteText by remember { mutableStateOf("") }
 
@@ -143,14 +153,6 @@ fun GpsTaggingKmlScreen() {
     val trackPoints = remember { mutableStateListOf<TrackPoint>() }
     val taggedPoints = remember { mutableStateListOf<TaggedPoint>() }
 
-    val categories = listOf(
-        "Titik Utama",
-        "Tiang / Patok",
-        "ODP / Closure",
-        "Persimpangan",
-        "Catatan Lapangan"
-    )
-
     var hasLocationPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -158,6 +160,13 @@ fun GpsTaggingKmlScreen() {
                 Manifest.permission.ACCESS_FINE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
         )
+    }
+
+    LaunchedEffect(showSavedBadge) {
+        if (showSavedBadge) {
+            delay(3500L)
+            showSavedBadge = false
+        }
     }
 
     fun isAccurateEnough(loc: Location): Boolean {
@@ -200,9 +209,9 @@ fun GpsTaggingKmlScreen() {
     DisposableEffect(hasLocationPermission, isTracking, isRefreshingGps) {
         val shouldListen = hasLocationPermission && (isTracking || isRefreshingGps)
         if (shouldListen) {
-            val interval = if (isTracking) 3500L else 2000L
+            val interval = if (isTracking) 1500L else 2000L
             val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, interval)
-                .setMinUpdateIntervalMillis(1500L)
+                .setMinUpdateIntervalMillis(1000L)
                 .build()
             fusedLocationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
             fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
@@ -223,7 +232,8 @@ fun GpsTaggingKmlScreen() {
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }
     }
-        val permissionLauncher = rememberLauncherForActivityResult(
+
+    val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { perms ->
         hasLocationPermission = perms[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
@@ -234,6 +244,19 @@ fun GpsTaggingKmlScreen() {
             Toast.makeText(context, "Izin diberikan, survei aktif", Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(context, "Izin lokasi diperlukan untuk survei GPS", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun buildAutoTagName(category: String): String {
+        val countInCategory = taggedPoints.count { it.category.equals(category, ignoreCase = true) } + 1
+        return "$category $countInCategory"
+    }
+
+    fun selectCategory(newCategory: String) {
+        selectedCategory = newCategory
+        if (tagName.isBlank() || isTagNameAuto) {
+            tagName = buildAutoTagName(newCategory)
+            isTagNameAuto = true
         }
     }
 
@@ -283,24 +306,9 @@ fun GpsTaggingKmlScreen() {
             }
     }
 
-    fun addTagPoint() {
-        isTaggingPressed = true
-        val loc = currentLocation
-        if (loc == null) {
-            isTaggingPressed = false
-            Toast.makeText(context, "Tekan GPS dulu atau tunggu koordinat terkunci", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (loc.hasAccuracy() && loc.accuracy > 35.0f) {
-            Toast.makeText(
-                context,
-                String.format(Locale.US, "Peringatan: Akurasi ±%.1f m (kurang presisi)", loc.accuracy),
-                Toast.LENGTH_SHORT
-            ).show()
-        }
-
-        val alt = if (loc.hasAltitude()) loc.altitude else 0.0
-        val cleanName = tagName.trim().ifEmpty { "Titik ${taggedPoints.size + 1}" }
+    fun finalizeTagWithLocation(targetLoc: Location) {
+        val alt = if (targetLoc.hasAltitude()) targetLoc.altitude else 0.0
+        val cleanName = tagName.trim().ifEmpty { buildAutoTagName(selectedCategory) }
         val timeStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
 
         taggedPoints.add(
@@ -308,21 +316,83 @@ fun GpsTaggingKmlScreen() {
                 name = cleanName,
                 category = selectedCategory,
                 note = noteText.trim(),
-                latitude = loc.latitude,
-                longitude = loc.longitude,
+                latitude = targetLoc.latitude,
+                longitude = targetLoc.longitude,
                 altitude = alt,
                 timestamp = timeStr
             )
         )
 
         if (isTracking && !isLineLocked) {
-            appendTrackPointIfValid(loc, minMeters = 1.0)
+            appendTrackPointIfValid(targetLoc, minMeters = 1.0)
         }
 
-        tagName = ""
+        tagName = buildAutoTagName(selectedCategory)
+        isTagNameAuto = true
         noteText = ""
         isTaggingPressed = false
         Toast.makeText(context, "Titik '$cleanName' ditambahkan", Toast.LENGTH_SHORT).show()
+    }
+
+    fun addTagPoint() {
+        if (!hasLocationPermission) {
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+            return
+        }
+
+        isTaggingPressed = true
+        val screenLoc = currentLocation
+
+        fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+            .addOnSuccessListener { freshLoc ->
+                val chosenLoc: Location? = when {
+                    freshLoc == null -> screenLoc
+                    screenLoc == null -> freshLoc
+                    else -> {
+                        val jumpMeters = freshLoc.distanceTo(screenLoc)
+                        val maxGlitchMeters = 12.0f
+                        val freshWorseAccuracy = freshLoc.hasAccuracy() &&
+                            screenLoc.hasAccuracy() &&
+                            freshLoc.accuracy > screenLoc.accuracy + 5.0f
+
+                        if (jumpMeters > maxGlitchMeters || freshWorseAccuracy) {
+                            screenLoc
+                        } else {
+                            currentLocation = freshLoc
+                            freshLoc
+                        }
+                    }
+                }
+
+                if (chosenLoc == null) {
+                    isTaggingPressed = false
+                    Toast.makeText(context, "Menunggu koordinat GPS...", Toast.LENGTH_SHORT).show()
+                    return@addOnSuccessListener
+                }
+
+                if (chosenLoc.hasAccuracy() && chosenLoc.accuracy > 35.0f) {
+                    Toast.makeText(
+                        context,
+                        String.format(Locale.US, "Peringatan: Akurasi ±%.1f m (kurang presisi)", chosenLoc.accuracy),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+
+                finalizeTagWithLocation(chosenLoc)
+            }
+            .addOnFailureListener {
+                if (screenLoc != null) {
+                    finalizeTagWithLocation(screenLoc)
+                } else {
+                    isTaggingPressed = false
+                    Toast.makeText(context, "Gagal mengambil posisi GPS", Toast.LENGTH_SHORT).show()
+                }
+            }
     }
 
     fun clearSessionData() {
@@ -364,8 +434,8 @@ fun GpsTaggingKmlScreen() {
         val saved = saveKmlToDownloads(context, fileName, kmlContent)
         if (saved) {
             clearSessionData()
-            kmlFileName = ""
-            Toast.makeText(context, "Tersimpan di Download/$fileName & sesi direset", Toast.LENGTH_LONG).show()
+            showSavedBadge = true
+            Toast.makeText(context, "Tersimpan di Download/$fileName", Toast.LENGTH_LONG).show()
         } else {
             Toast.makeText(context, "Gagal menyimpan file KML", Toast.LENGTH_LONG).show()
         }
@@ -495,7 +565,7 @@ fun GpsTaggingKmlScreen() {
             }
         }
     ) { innerPadding ->
-        Column(
+                    Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
@@ -564,12 +634,6 @@ fun GpsTaggingKmlScreen() {
                         modifier = Modifier.weight(1f)
                     )
                     StatBox(
-                        label = "TITIK JALUR",
-                        value = "${trackPoints.size}",
-                        valueColor = AccentBlue,
-                        modifier = Modifier.weight(1f)
-                    )
-                    StatBox(
                         label = "PANJANG JALUR",
                         value = "${totalPathMeters.toInt()} m",
                         valueColor = AccentBlue,
@@ -600,10 +664,11 @@ fun GpsTaggingKmlScreen() {
                             text = when {
                                 isRefreshingGps -> "• REFRESH"
                                 currentLocation != null && isTracking -> "• AKTIF"
-                                currentLocation != null -> "• TERSIMPAN"
+                                showSavedBadge -> "• TERSIMPAN"
+                                currentLocation != null -> "• TERKUNCI"
                                 else -> "• STANDBY"
                             },
-                            color = if (currentLocation != null) BtnGreen else TextMuted,
+                            color = if (currentLocation != null || showSavedBadge) BtnGreen else TextMuted,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp
                         )
@@ -688,10 +753,13 @@ fun GpsTaggingKmlScreen() {
                     )
                     OutlinedTextField(
                         value = tagName,
-                        onValueChange = { tagName = it },
+                        onValueChange = {
+                            tagName = it
+                            isTagNameAuto = false
+                        },
                         placeholder = {
                             Text(
-                                "Contoh: Patok A / Tiang 01",
+                                "Contoh: Tiang TE 1 / ODP 1",
                                 color = TextMuted,
                                 fontSize = 13.sp,
                                 maxLines = 1,
@@ -756,7 +824,7 @@ fun GpsTaggingKmlScreen() {
                                     DropdownMenuItem(
                                         text = { Text(cat, color = TextWhite, fontSize = 13.sp) },
                                         onClick = {
-                                            selectedCategory = cat
+                                            selectCategory(cat)
                                             categoryExpanded = false
                                         }
                                     )
@@ -800,7 +868,8 @@ fun GpsTaggingKmlScreen() {
                     }
                 }
             }
-                        Column(
+
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
@@ -875,7 +944,6 @@ fun GpsTaggingKmlScreen() {
         }
     }
 }
-
 @Composable
 private fun StatBox(
     label: String,
@@ -919,6 +987,16 @@ private fun escapeXml(input: String): String {
         .replace("'", "&apos;")
 }
 
+private fun categoryStyleId(category: String): String {
+    return when (category.trim().lowercase(Locale.ROOT)) {
+        "tiang te" -> "#styleTiangTe"
+        "tiang tb" -> "#styleTiangTb"
+        "odp" -> "#styleOdp"
+        "uc/closure", "closure", "uc" -> "#styleUcClosure"
+        else -> "#styleTiangTe"
+    }
+}
+
 private fun buildKml22(
     title: String,
     taggedPoints: List<TaggedPoint>,
@@ -934,12 +1012,14 @@ private fun buildKml22(
                 if (pt.note.isNotEmpty()) add("Keterangan: ${escapeXml(pt.note)}")
             }.joinToString(" | ")
 
+            val styleUrl = categoryStyleId(pt.category)
+
             append(
                 """
                 <Placemark>
                   <name>${escapeXml(pt.name)}</name>
                   <description>$descParts</description>
-                  <styleUrl>#tagPin</styleUrl>
+                  <styleUrl>$styleUrl</styleUrl>
                   <Point>
                     <coordinates>${pt.longitude},${pt.latitude},${pt.altitude}</coordinates>
                   </Point>
@@ -973,17 +1053,45 @@ private fun buildKml22(
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
     <name>$safeTitle</name>
-    <Style id="tagPin">
+    <Style id="styleTiangTe">
       <IconStyle>
-        <color>ffffcc00</color>
+        <color>ff00ffff</color>
+        <scale>1.1</scale>
         <Icon>
           <href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href>
         </Icon>
       </IconStyle>
     </Style>
+    <Style id="styleTiangTb">
+      <IconStyle>
+        <color>ffff0000</color>
+        <scale>1.1</scale>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png</href>
+        </Icon>
+      </IconStyle>
+    </Style>
+    <Style id="styleOdp">
+      <IconStyle>
+        <color>ff0000ff</color>
+        <scale>1.15</scale>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/kml/paddle/red-circle.png</href>
+        </Icon>
+      </IconStyle>
+    </Style>
+    <Style id="styleUcClosure">
+      <IconStyle>
+        <color>ff00ff00</color>
+        <scale>1.15</scale>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/kml/paddle/grn-diamond.png</href>
+        </Icon>
+      </IconStyle>
+    </Style>
     <Style id="trackLine">
       <LineStyle>
-        <color>ff00a5ff</color>
+        <color>ff0000ff</color>
         <width>4</width>
       </LineStyle>
     </Style>
