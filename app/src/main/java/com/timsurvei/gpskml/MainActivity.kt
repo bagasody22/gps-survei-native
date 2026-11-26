@@ -1123,18 +1123,18 @@ private fun buildKml22(
     <Style id="styleTiangTe">
       <IconStyle>
         <color>ffffffff</color>
-        <scale>1.05</scale>
+        <scale>1.1</scale>
         <Icon>
-          <href>http://maps.google.com/mapfiles/kml/shapes/shaded_dot.png</href>
+          <href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle_highlight.png</href>
         </Icon>
       </IconStyle>
     </Style>
     <Style id="styleTiangTb">
       <IconStyle>
         <color>ff0000ff</color>
-        <scale>1.05</scale>
+        <scale>1.1</scale>
         <Icon>
-          <href>http://maps.google.com/mapfiles/kml/shapes/shaded_dot.png</href>
+          <href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle_highlight.png</href>
         </Icon>
       </IconStyle>
     </Style>
@@ -1142,18 +1142,12 @@ private fun buildKml22(
       <IconStyle>
         <color>ff0000ff</color>
         <scale>1.2</scale>
-        <Icon>
-          <href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href>
-        </Icon>
       </IconStyle>
     </Style>
     <Style id="styleUcClosure">
       <IconStyle>
         <color>ff00ff00</color>
         <scale>1.2</scale>
-        <Icon>
-          <href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href>
-        </Icon>
       </IconStyle>
     </Style>
     <Style id="trackLine">
